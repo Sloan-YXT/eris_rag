@@ -24,7 +24,10 @@ logger = logging.getLogger(__name__)
 META_INSTRUCTION = """## 元指令
 你是艾莉丝·格雷拉特，不是AI助手。请遵守以下规则：
 - 用第一人称回应，保持角色一致性
-- 参考上方的行为规则和场景记忆来决定反应方式
+- 下方"场景记忆"中标有【已知事实】的条目优先级最高，与其他内容冲突时以【已知事实】为准
+- 标有"★"的场景与用户的问题直接相关，必须优先参考
+- 其他场景记忆作为补充参考
+- 如果以上内容中完全没有相关信息，就坦率地说不知道或不清楚，不要编造
 - 语气、用词要符合角色的说话风格
 - 不要打破角色，不要提及自己是AI
 - 回复长度适中，像真实对话一样自然"""
@@ -42,10 +45,12 @@ class Assembler:
         l3: L3EpisodicMemory,
         l4: L4WorkingMemory,
         subconscious=None,
+        knowledge_base=None,
     ):
         self._config = config
         self._step_a = step_a
         self._l1 = l1
+        self._kb = knowledge_base  # KnowledgeBase | None
         self._l2 = l2
         self._l3 = l3
         self._l4 = l4
@@ -172,17 +177,29 @@ class Assembler:
         domain_filter = l1_result.active_domains if l1_result else None
         l2_result = self._l2.match(triggers, domain_filter=domain_filter) if self._l2.is_loaded else None
 
-        # L3: Scene retrieval
-        # 内容检索：search_queries 或 用户原话
-        # 关系检索：如果知道对方身份，单独检索互动场景
+        # 知识库检索（优先于 L3，热加载）
+        kb_text = ""
         search_queries = step_a_result.search_queries
-        content_query = search_queries[0] if search_queries else user_message
+        llm_keywords = step_a_result.keywords
+        if self._kb:
+            self._kb.check_reload()
+            kb_query = search_queries[0] if search_queries else user_message
+            kb_hits = self._kb.retrieve(kb_query, top_k=2, llm_keywords=llm_keywords)
+            if kb_hits:
+                kb_text = "\n".join(f"【已知事实】{h}" for h in kb_hits)
+
+        # L3: Scene retrieval
+        if search_queries:
+            content_query = search_queries[0] + " " + user_message
+        else:
+            content_query = user_message
 
         # 内容检索
         content_result = self._l3.retrieve(
             query=content_query,
             filter_tags=None,
             topic_is_past=topic_is_past,
+            llm_keywords=llm_keywords,
         )
 
         if identity:
@@ -201,7 +218,7 @@ class Assembler:
             if relation_result.prompt_text:
                 for sid, part in zip(
                     relation_result.scenes_used,
-                    relation_result.prompt_text.split("\n\n"),
+                    relation_result.prompt_text.split("\n\n---SCENE---\n\n"),
                 ):
                     if sid not in seen:
                         seen.add(sid)
@@ -243,10 +260,18 @@ class Assembler:
         user_prompt = self._get_user_prompt(sender_id, sender_nickname)
 
         # Assemble with token budget enforcement
+        # 知识库结果拼在 L3 前面（优先级更高）
+        l3_combined = ""
+        if kb_text:
+            l3_combined = kb_text + "\n\n"
+        if l3_result and l3_result.prompt_text:
+            # 内部分隔符替换为普通换行
+            l3_combined += l3_result.prompt_text.replace("\n\n---SCENE---\n\n", "\n\n")
+
         system_prompt = self._build_prompt(
             l1_text=l1_result.prompt_text if l1_result else "",
             l2_text=l2_result.prompt_text if l2_result else "",
-            l3_text=l3_result.prompt_text if l3_result else "",
+            l3_text=l3_combined,
             l4_text=l4_text,
             user_prompt=user_prompt,
         )
@@ -311,9 +336,9 @@ class Assembler:
         if l2_tokens + l3_tokens <= remaining_budget:
             parts = [fixed_text]
             if l2_section:
-                parts.insert(-1, l2_section)  # Before meta-instruction
+                parts.append(l2_section)
             if l3_section:
-                parts.insert(-1, l3_section)
+                parts.append(l3_section)
             return "\n\n".join(parts)
 
         # Need to trim — trim L3 first

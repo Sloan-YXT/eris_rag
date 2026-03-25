@@ -42,6 +42,7 @@ _step_a: StepA | None = None
 _l4: L4WorkingMemory | None = None
 _assembler: Assembler | None = None
 _subconscious = None  # SubconsciousMemory | None
+_kb = None  # KnowledgeBase | None
 _start_time: float = 0.0
 
 
@@ -106,9 +107,16 @@ async def lifespan(app: FastAPI):
         _subconscious = SubconsciousMemory(_config, _embed_model)
         logger.info("Subconscious memory system enabled")
 
+    # Initialize knowledge base
+    global _kb
+    if _embed_model and _embed_model.is_loaded:
+        from src.layers.knowledge_base import KnowledgeBase
+        _kb = KnowledgeBase(_config, _embed_model)
+        logger.info(f"Knowledge base loaded: {_kb.count} entries")
+
     # Build assembler if minimum components available
     if _l3 and _step_a and _step_a.is_loaded:
-        _assembler = Assembler(_config, _step_a, _l1, _l2, _l3, _l4, subconscious=_subconscious)
+        _assembler = Assembler(_config, _step_a, _l1, _l2, _l3, _l4, subconscious=_subconscious, knowledge_base=_kb)
     else:
         logger.warning("Assembler unavailable — missing Step A or L3")
 
@@ -126,7 +134,7 @@ app = FastAPI(title="Eris RAG", version="0.1.0", lifespan=lifespan)
 @app.post("/retrieve", response_model=RetrieveResponse)
 async def retrieve(req: RetrieveRequest, background_tasks: BackgroundTasks):
     """Full personality assembly pipeline: Step A → L1 → L2 → L3 → L4 → assemble."""
-    logger.info(f"[/retrieve] sender={req.sender_id} nick={req.sender_nickname} msg={req.user_message[:50]}")
+    logger.info(f"[/retrieve] sender={req.sender_id} nick={req.sender_nickname} msg={req.user_message[:80]}")
     if _assembler is None:
         raise HTTPException(503, "Assembler not available — check /health for details")
 
@@ -148,6 +156,11 @@ async def retrieve(req: RetrieveRequest, background_tasks: BackgroundTasks):
             bot_reply="",  # 此时还没有 bot 回复
             conversation_context=req.conversation_context,
         )
+
+    # Debug: 打印完整 system_prompt
+    meta = result.metadata
+    logger.info(f"[/retrieve] tokens={meta.total_tokens} l1={meta.l1_modules_used} l2={meta.l2_rules_used} l3={meta.l3_scenes_used}")
+    logger.debug(f"[/retrieve] system_prompt:\n{result.system_prompt}")
 
     return RetrieveResponse(
         enhanced_system_prompt=result.system_prompt,
@@ -178,6 +191,16 @@ async def query(req: QueryRequest):
             results=[QuerySceneResult(**r) for r in raw_results],
             raw_text="\n\n---\n\n".join(text_parts),
         )
+
+
+@app.post("/reset")
+async def reset(req: dict):
+    """Reset L4 session state for a user."""
+    sender_id = req.get("sender_id", "")
+    if sender_id and _l4:
+        _l4.reset(sender_id)
+        logger.info(f"[/reset] session reset for {sender_id}")
+    return {"status": "ok"}
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -300,9 +323,17 @@ def main():
 
     config = Config()
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+    # 第三方库日志压到 WARNING，只让自己的 DEBUG 输出
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn").setLevel(logging.INFO)
+    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+    logging.getLogger("chromadb").setLevel(logging.WARNING)
+    logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
+    logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
     uvicorn.run(
         "src.server:app",
         host=config.server_host,

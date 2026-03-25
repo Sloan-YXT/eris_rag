@@ -46,10 +46,10 @@ EXTRACT_PROMPT = """\
 
 ## 输出
 如果有重要记忆，输出：
-{{"important": true, "memory": "用一句话概括这个重要事件"}}
+{"important": true, "memory": "用一句话概括这个重要事件"}
 
 如果没有：
-{{"important": false}}
+{"important": false}
 
 输出纯 JSON。"""
 

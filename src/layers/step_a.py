@@ -44,13 +44,14 @@ _LLM_TEMPLATE = """\
 
 输出纯 JSON，格式如下：
 ```json
-{{"triggers": ["标签1", "标签2"], "topic_is_past": false, "emotion_hint": "", "search_queries": ["检索词1", "检索词2"]}}
+{{"triggers": ["标签1", "标签2"], "topic_is_past": false, "emotion_hint": "", "search_queries": ["检索短语1", "检索短语2"], "keywords": ["专有名词1", "专有名词2"]}}
 ```
 
 - triggers: 从上方可用标签中选择所有匹配的标签（可以多选，通常 1-4 个）
 - topic_is_past: 用户是否在谈论过去/回忆（true/false）
 - emotion_hint: 最突出的情绪标签，没有明显情绪则留空字符串
-- search_queries: 2-3 个用于检索小说原文的关键词短语，要覆盖用户消息的核心意图。例如用户说"你送给鲁迪的第一个生日礼物"，应生成["艾莉丝 鲁迪乌斯 生日 礼物", "庆生会 魔杖", "傲慢水龙王"]
+- search_queries: 2-3 个用于语义检索小说原文的短语
+- keywords: 用户消息中的专有名词、术语、特指事物（如人名、地名、武器名、招式名、组织名等）。这些词会用于精确文本匹配，必须和原文中的写法完全一致。例如用户说"剑神流一共有几招"→keywords:["剑神流"]；"傲慢的水龙王"→keywords:["傲慢水龙王"]；"神刀是谁的"→keywords:["神刀"]。日常闲聊没有专有名词时留空数组。
 
 输出纯 JSON，不要 markdown 标记。"""
 
@@ -249,12 +250,14 @@ class StepA:
         if emotion_hint and emotion_hint not in valid_tags:
             emotion_hint = ""
         search_queries = [str(q) for q in data.get("search_queries", []) if q]
+        keywords = [str(k) for k in data.get("keywords", []) if k]
 
         return StepAResult(
             triggers=sorted(triggers),
             topic_is_past=topic_is_past,
             emotion_hint=emotion_hint,
             search_queries=search_queries,
+            keywords=keywords,
         )
 
     # ── Shared helpers ───────────────────────────────────────

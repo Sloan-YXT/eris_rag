@@ -185,11 +185,12 @@ async def step_reduce_l1(config):
 def _fix_activate_on(config):
     """确保 L1 模块的 activate_on 使用 taxonomy 中定义的实际 tags。"""
     import yaml
-    from pathlib import Path
 
     with open(config.taxonomy_path, encoding="utf-8") as f:
         tax = yaml.safe_load(f)
-    domains = tax["domains"]
+    domains = tax.get("domains", {})
+    if not domains:
+        return
 
     modules_dir = config.character_data_dir / "l1_modules"
     for f in sorted(modules_dir.glob("*.yaml")):

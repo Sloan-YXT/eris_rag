@@ -127,6 +127,7 @@ class L3EpisodicMemory:
         topic_is_past: bool = False,
         top_k: int | None = None,
         n_candidates: int | None = None,
+        llm_keywords: list[str] | None = None,
     ) -> L3Result:
         """检索与 query 相关的原文片段。
 
@@ -179,7 +180,7 @@ class L3EpisodicMemory:
                 return L3Result()
 
         # 路线2: 关键词精确匹配
-        keyword_hits = self._keyword_search(query, n_candidates)
+        keyword_hits = self._keyword_search(query, n_candidates, llm_keywords=llm_keywords)
 
         # 合并语义结果 + 关键词结果
         seen_ids: set[str] = set()
@@ -238,8 +239,8 @@ class L3EpisodicMemory:
         keyword_entries = [(s[1], s[2], s[3], s[4]) for s in scored if s[1] in keyword_hit_ids]
         non_keyword = [s for s in scored if s[1] not in keyword_hit_ids]
 
-        # 关键词命中最多保留 top_k 的一半，剩余名额给 reranker
-        kw_slots = min(len(keyword_entries), max(1, top_k // 2))
+        # 关键词命中优先：有命中时占大多数位置，语义结果补充
+        kw_slots = min(len(keyword_entries), max(1, top_k - 1))
         remaining_slots = top_k - kw_slots
 
         if self._reranker and self._reranker.is_loaded and len(non_keyword) > remaining_slots:
@@ -253,6 +254,7 @@ class L3EpisodicMemory:
 
         # 关键词命中排前面
         final = keyword_entries[:kw_slots] + reranked_entries
+        kw_id_set = {e[0] for e in keyword_entries[:kw_slots]}
 
         # 格式化输出
         prompt_parts = []
@@ -262,9 +264,20 @@ class L3EpisodicMemory:
             period = meta.get("period", "")
             target_period = self._config.target_period
             formatted = self._format_chunk(doc, meta, period, target_period)
+            # 关键词命中的场景加标记，点明匹配到的关键词
+            if doc_id in kw_id_set:
+                # 找出这个 chunk 里命中了哪些关键词
+                import re as _re
+                query_kws = _re.findall(r"[\u4e00-\u9fff]{2,}", query)
+                matched = [kw for kw in query_kws if kw in doc]
+                if matched:
+                    kw_str = "、".join(matched[:3])
+                    formatted = f"★以下原文提到了「{kw_str}」，这是事实，请据此回答★\n" + formatted
+                else:
+                    formatted = "★以下内容与用户的问题直接相关★\n" + formatted
             prompt_parts.append(formatted)
 
-        prompt_text = "\n\n".join(prompt_parts) if prompt_parts else ""
+        prompt_text = "\n\n---SCENE---\n\n".join(prompt_parts) if prompt_parts else ""
         return L3Result(prompt_text=prompt_text, scenes_used=scene_ids)
 
     def retrieve_raw(
@@ -285,8 +298,10 @@ class L3EpisodicMemory:
             include=["documents", "metadatas", "distances"],
         )
 
-        # 路线2: 关键词精确匹配（query 中的连续中文词，>=2字）
-        keyword_results = self._keyword_search(query, top_k)
+        # 路线2: 关键词精确匹配（从 query 中提取 2-3 字中文片段）
+        import re as _re
+        fallback_kws = [s for s in _re.findall(r"[\u4e00-\u9fff]{2,4}", query) if len(s) <= 4]
+        keyword_results = self._keyword_search(query, top_k, llm_keywords=fallback_kws)
 
         # 合并去重，语义优先
         seen_ids: set[str] = set()
@@ -331,34 +346,15 @@ class L3EpisodicMemory:
 
     # ── 关键词检索 ───────────────────────────────────────────
 
-    # 常见虚词，从关键词中去除后生成额外变体
-    _PARTICLES = set("的了过着地得在是和与也都")
-
-    def _keyword_search(self, query: str, top_k: int) -> list[dict]:
+    def _keyword_search(self, query: str, top_k: int, llm_keywords: list[str] | None = None) -> list[dict]:
         """用 where_document $contains 做原文精确匹配。
 
-        提取 query 中 >=2 字的连续中文片段作为关键词，
-        同时去掉虚词生成变体（如 "傲慢的水龙王" → "傲慢水龙王"），
-        逐个查询，合并结果。
+        使用 LLM 提取的 keywords（专有名词），直接 $contains 查询。
+        没有 keywords 时不做关键词搜索（纯语义）。
         """
-        import re
-        # 提取连续中文片段（>=2字符），作为关键词候选
-        raw_keywords = re.findall(r"[\u4e00-\u9fff]{2,}", query)
-        if not raw_keywords:
+        keywords = [k for k in (llm_keywords or []) if len(k) >= 2]
+        if not keywords:
             return []
-
-        # 生成变体：去掉虚词
-        keywords: list[str] = []
-        for kw in raw_keywords:
-            keywords.append(kw)
-            stripped = "".join(c for c in kw if c not in self._PARTICLES)
-            if stripped != kw and len(stripped) >= 2:
-                keywords.append(stripped)
-            # 也按虚词拆分，取 >=2 字的子段
-            parts = re.split(r"[的了过着地得在是和与也都]", kw)
-            for p in parts:
-                if len(p) >= 2 and p not in keywords:
-                    keywords.append(p)
 
         seen_ids: set[str] = set()
         output: list[dict] = []

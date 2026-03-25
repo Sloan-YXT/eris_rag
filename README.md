@@ -1,5 +1,7 @@
 # Eris RAG — 小说角色人格增强服务器
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 从小说原文构建四层认知模型（L1 核心身份 → L2 行为规则 → L3 场景记忆 → L4 会话状态），为聊天机器人提供精准的角色扮演增强。
 
 ## 架构

@@ -253,6 +253,14 @@ def main():
         sc = SubconsciousMemory(config, embed_model)
         sc.rebuild_all()
         logger.info("潜意识向量库重建完成")
+    elif stage == "rebuild_kb":
+        from src.embedding.embed_model import EmbeddingModel
+        from src.layers.knowledge_base import KnowledgeBase
+        embed_model = EmbeddingModel(config)
+        embed_model.load()
+        kb = KnowledgeBase(config, embed_model)
+        count = kb.rebuild()
+        logger.info(f"知识库重建完成: {count} 条")
     elif stage == "all":
         phase_chunk(config)
         phase_check(config)

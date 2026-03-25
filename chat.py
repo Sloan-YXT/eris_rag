@@ -84,11 +84,16 @@ def main():
         if user_input == "/clear":
             history.clear()
             context.clear()
-            # 重置服务器端 L4 状态
-            httpx.post(f"{RAG_URL}/retrieve", json={
-                "user_message": "", "sender_id": SENDER_ID,
-            }, timeout=10)
+            try:
+                httpx.post(f"{RAG_URL}/reset", json={"sender_id": SENDER_ID}, timeout=5)
+            except Exception:
+                pass
             print("[会话已重置]")
+            continue
+        if user_input == "/debug":
+            debug_mode = not globals().get("_debug", False)
+            globals()["_debug"] = debug_mode
+            print(f"[debug {'开启' if debug_mode else '关闭'}]")
             continue
 
         # 1. 调 RAG 获取 system_prompt
@@ -110,13 +115,6 @@ def main():
         if not system_prompt:
             print("[警告: RAG 返回空 prompt，使用默认]")
             system_prompt = "你是艾莉丝·格雷拉特，用符合角色的方式回应。"
-
-        # Debug: 输入 /debug 切换显示 system_prompt
-        if user_input == "/debug":
-            debug_mode = not globals().get("_debug", False)
-            globals()["_debug"] = debug_mode
-            print(f"[debug {'开启' if debug_mode else '关闭'}]")
-            continue
 
         if globals().get("_debug"):
             print(f"\n{'='*40} SYSTEM PROMPT {'='*40}")

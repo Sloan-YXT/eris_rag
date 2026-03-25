@@ -86,7 +86,8 @@ class StepAResult(BaseModel):
     triggers: list[str] = Field(default_factory=list)
     topic_is_past: bool = False
     emotion_hint: str = ""
-    search_queries: list[str] = Field(default_factory=list)  # LLM 生成的检索关键词
+    search_queries: list[str] = Field(default_factory=list)  # LLM 生成的语义检索短语
+    keywords: list[str] = Field(default_factory=list)         # LLM 提取的专有名词（用于精确匹配）
 
 
 # ── Layer Results ─────────────────────────────────────────
@@ -165,6 +166,7 @@ class QueryResponse(BaseModel):
 
 class QuerySceneResult(BaseModel):
     """A single scene in structured query results."""
+    model_config = {"extra": "ignore"}
     scene_id: str
     volume: int
     chapter: int
