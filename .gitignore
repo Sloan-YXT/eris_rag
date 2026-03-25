@@ -1,0 +1,27 @@
+# API keys
+config.yaml
+
+# 生成数据（用 train.py 重建）
+vectordb/
+data/characters/
+data/memories/
+
+# 小说原文（版权）
+data/novel/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/

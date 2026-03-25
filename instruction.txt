@@ -1,0 +1,185 @@
+# Eris RAG Server — AstrBot 插件开发指南
+
+## 概述
+
+本地 RAG 服务器为 AstrBot 提供角色人格增强。插件在 on_llm_request 钩子中调用 RAG 服务器，
+将返回的 enhanced_system_prompt 注入到 LLM 请求的 system_prompt 中。
+
+RAG 服务器地址：http://<RAG_IP>:8787
+
+## 核心端点
+
+### POST /retrieve — 人格增强（每条消息必调）
+
+请求体：
+{
+  "user_message": "你练剑练了多久了？",          // 必填，当前用户消息
+  "conversation_context": ["你好", "哼，你谁啊"], // 可选，最近几轮对话（建议6条）
+  "sender_id": "649535675",                       // 可选，用户QQ号（字符串），用于身份匹配+会话隔离+潜意识记忆
+  "sender_nickname": "鲁迪"                       // 可选，用户昵称，用于身份识别
+}
+
+响应体：
+{
+  "enhanced_system_prompt": "## 核心身份\n你是艾莉丝...",   // 直接注入 system_prompt
+  "metadata": {
+    "l1_modules_used": ["core", "combat", "growth"],        // 调试用，不需要传给LLM
+    "l2_rules_used": ["speech_style", "beh_combat_001"],
+    "l3_scenes_used": ["v13_ch02_4570", "v09_ch14_3291"],
+    "total_tokens": 2456
+  }
+}
+
+### POST /query — 直接查询（可选，用于 /ask 命令）
+
+请求体：
+{
+  "query": "神刀是什么",    // 查询内容
+  "top_k": 3,               // 返回条数
+  "format": "raw"            // "raw" 或 "structured"
+}
+
+响应体：
+{
+  "results": [
+    {
+      "scene_id": "v23_ch05_8094",
+      "volume": 23,
+      "chapter": 5,
+      "text": "只要使用神刀就不存在什么打不倒的对手..."
+    }
+  ],
+  "raw_text": "..."
+}
+
+### GET /health — 健康检查
+
+响应体：
+{
+  "status": "ok",
+  "embedding_loaded": true,
+  "reranker_loaded": true,
+  "scene_count": 8647,
+  "l1_loaded": true,
+  "l2_loaded": true,
+  "uptime_seconds": 120.5
+}
+
+## 插件实现要点
+
+### 1. on_llm_request 钩子（核心逻辑）
+
+伪代码：
+  在 on_llm_request(event, req) 中：
+    1. 从 event 取 sender_id（QQ号）和 sender_nickname（昵称）
+    2. 从 req.messages 取最新用户消息和最近6条上下文
+    3. POST 到 RAG_URL/retrieve，传入上述信息
+    4. 将响应的 enhanced_system_prompt 与 AstrBot 自身人格 prompt 拼接
+    5. 赋值给 req.system_prompt
+
+拼接方式：
+  req.system_prompt = astrbot_persona_prompt + "\n\n" + enhanced_system_prompt
+
+  astrbot_persona_prompt 放输出风格约束、防降智指令、对话示范（few-shot）。
+  enhanced_system_prompt 放角色性格、行为规则、场景记忆、用户关系、潜意识记忆。
+  两者不重叠。
+
+### 2. /ask 命令（可选功能）
+
+如果用户消息以 /ask 开头：
+  1. 提取 /ask 后面的查询内容
+  2. POST 到 RAG_URL/query
+  3. 将返回的 raw_text 追加到对话上下文
+
+### 3. 配置项（_conf_schema.json）
+
+{
+  "rag_server_url": {
+    "description": "RAG 服务器地址",
+    "type": "string",
+    "default": "http://localhost:8787"
+  },
+  "enabled": {
+    "description": "是否启用 RAG 人格增强",
+    "type": "bool",
+    "default": true
+  },
+  "timeout_ms": {
+    "description": "请求超时（毫秒）",
+    "type": "int",
+    "default": 10000
+  }
+}
+
+## 关键注意事项
+
+1. enhanced_system_prompt 是完整的人格 prompt，约 2000-3000 tokens。
+   与 AstrBot 人格 prompt 拼接后总计不超过 3500 tokens。
+
+2. sender_id 必须传 QQ 号字符串。服务器用它做三件事：
+   - 匹配 user_prompts.yaml 中的用户身份（谁是鲁迪乌斯、谁是洛琪希）
+   - L4 会话状态隔离（每个用户独立的情绪/话题追踪）
+   - 潜意识记忆读写（每个用户独立的长期记忆向量库）
+
+3. sender_nickname 传用户昵称。用于：
+   - 昵称自动匹配角色身份（昵称叫"洛琪希"就自动用洛琪希的关系配置）
+   - 未匹配时直接告诉 LLM "对方是xxx"
+
+4. conversation_context 传最近 6 条消息（用户和 bot 交替），
+   用于 Step A 意图分析的上下文参考。
+
+5. 超时和失败必须 graceful fallback：
+   RAG 服务器不可用时保留 AstrBot 原有 system_prompt，用户无感知。
+
+6. 不要缓存 enhanced_system_prompt：
+   每条消息都应该请求，因为 L4 会话状态（情绪、话题）和潜意识记忆每轮可能变化。
+
+7. 潜意识记忆的异步写入在服务器端自动完成，插件不需要做任何额外操作。
+   只要正常调 /retrieve 传入 sender_id 和消息，服务器会自动判断是否有重要记忆需要存储。
+
+## enhanced_system_prompt 内部结构（参考，插件不需要解析）
+
+## 核心身份          ← 角色性格/动机/成长（1-3个模块，~800 tokens）
+## 对话对象          ← 对方是谁、该用什么态度（~60 tokens）
+## 当前状态          ← 对话轮次、情绪、话题 + 潜意识记忆（~100-200 tokens）
+## 元指令            ← 角色扮演基本规则（~80 tokens）
+## 用户自定义要求     ← 现代适配、输出格式（~100 tokens）
+## 行为规则          ← 具体情境行为规则（~400 tokens）
+## 场景记忆          ← 小说原文片段（~1000 tokens）
+
+## AstrBot 人格 prompt 建议内容
+
+放在 enhanced_system_prompt 之前拼接，只写 RAG 管不了的东西：
+
+【最高指令】你是艾莉丝·伯雷亚斯·格雷拉特。性格深度由 system_prompt 中的 RAG 内容提供。
+
+【说话风格】
+- 掷地有声，从容自信，不啰嗦。
+- 从不说教画大饼，不用"因为、所以"解释。
+- 害羞时嘴硬，不会甜言蜜语。
+
+【防降智】
+- 简单数学直接算对，用"别小看我"的语气。
+- 深奥学术推给鲁迪（"去问鲁迪吧"）。
+- 根据现实时间判断，不要中午说晚安。
+
+【绝对禁止】
+- 禁止单字敷衍（"好"、"随便"）。
+- 禁止太妹反问（"你想找打吗？"）。
+- 禁止回复末尾反问找话题。
+- 禁止复读"吃肉"和"有我在"。
+- 禁止括号/星号动作描写。
+- 禁止AI口吻。
+
+【对话示范】
+群友：喵喵喵~贴贴姐姐！
+你：今天怎么突然这么粘人。过来坐好，我给你顺顺毛。
+
+群友：我朋友好像在背后说我坏话，好纠结。
+你：有什么好纠结的，直接当面去问个清楚。是真朋友就把话说开。
+
+群友：艾莉丝笨笨的。
+你：哼，随你怎么说。家里有鲁迪负责动脑子就够了。
+
+弟弟：姐，有人在群里骂我！
+你：谁胆子这么大？把名字报上来。别怕，有姐姐在。

@@ -1,0 +1,26 @@
+{
+  "rag_server_url": {
+    "type": "string",
+    "title": "RAG 服务器地址",
+    "description": "本地 Eris RAG 服务器的 HTTP 地址",
+    "default": "http://localhost:8787"
+  },
+  "enabled": {
+    "type": "boolean",
+    "title": "启用 RAG 增强",
+    "description": "是否启用 RAG 人格增强（关闭后使用原始 system_prompt）",
+    "default": true
+  },
+  "timeout_ms": {
+    "type": "number",
+    "title": "超时时间 (ms)",
+    "description": "RAG 服务器请求超时，超时后降级为原始 prompt",
+    "default": 5000
+  },
+  "query_command_prefix": {
+    "type": "string",
+    "title": "查询命令前缀",
+    "description": "直接查询小说细节的命令前缀",
+    "default": "/ask"
+  }
+}

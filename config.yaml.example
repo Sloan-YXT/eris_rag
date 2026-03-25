@@ -1,0 +1,87 @@
+# Eris RAG Configuration
+# 复制为 config.yaml 后填入你的 API key
+
+server:
+  host: "0.0.0.0"
+  port: 8787
+
+# LLM API providers — 至少配一个
+api:
+  providers:
+    deepseek:
+      api_key: "your-deepseek-api-key-here"    # 必填
+      model: "deepseek-reasoner"
+      base_url: "https://api.deepseek.com/v1"
+    deepseek-v3:
+      api_key: "your-deepseek-api-key-here"    # 和上面相同的 key
+      model: "deepseek-chat"
+      base_url: "https://api.deepseek.com/v1"
+    # 可选：其他 provider
+    # gemini:
+    #   api_key: "your-gemini-key"
+    #   model: "gemini-2.5-pro-latest"
+    #   base_url: "https://generativelanguage.googleapis.com/v1beta"
+
+  # 构建阶段（一次性，python train.py 时使用）
+  preprocess:
+    annotate_tags: "deepseek-v3"          # 标注用 V3（快、便宜）
+    reduce_global_rules: "deepseek"       # 规则生成用 Reasoner（需要推理）
+    reduce_core_modules: "deepseek"       # 核心模块用 Reasoner
+
+  # 运行时（每次请求）
+  runtime:
+    step_a: "deepseek-v3"                 # 意图分析用 V3
+    l4_update: "local"
+
+# 本地 GPU 模型
+embedding:
+  model_name: "BAAI/bge-large-zh-v1.5"
+  device: "cuda"                          # 没有 GPU 改为 "cpu"（会很慢）
+  batch_size: 64
+
+reranker:
+  model_name: "BAAI/bge-reranker-v2-m3"
+  device: "cuda"
+
+# 向量数据库
+vectordb:
+  persist_dir: "./vectordb"
+  collection_name: "eris_scenes"          # 换角色时改这个名字
+
+# 角色配置 — 换角色时主要改这里
+character:
+  name: "eris"
+  data_dir: "./data/characters/eris"
+  novel_dir: "./data/novel/mushoku_tensei"
+  target_period: "回归后"                  # 模拟哪个时期的角色
+
+# 检索参数
+retrieval:
+  l3_candidates: 20
+  l3_top_k: 5
+  l3_relation_top_k: 2
+  l2_top_k: 4
+  target_total_tokens: 5000
+  subconscious_top_k: 3
+
+# 潜意识记忆
+memory:
+  enabled: true
+  provider: "deepseek-v3"
+  storage_dir: "./data/memories"
+  vectordb_prefix: "subconscious"
+
+# 分块参数
+chunking:
+  target_size: 384
+  max_size: 480
+  min_size: 100
+  overlap: 64
+
+# 预处理参数
+preprocess:
+  map_batch_size: 10
+  map_delay_seconds: 1.0
+
+taxonomy_path: "./data/tags_taxonomy.yaml"
+user_prompts_path: "./data/user_prompts.yaml"
