@@ -55,6 +55,15 @@ class Assembler:
         self._l3 = l3
         self._l4 = l4
         self._subconscious = subconscious  # SubconsciousMemory | None
+        # Agentic RAG（迭代检索）
+        if config.get("agentic.enabled", False):
+            from src.layers.agentic_retrieval import AgenticRetrieval
+            self._agentic = AgenticRetrieval(
+                config, l3,
+                max_iterations=config.get("agentic.max_iterations", 3),
+            )
+        else:
+            self._agentic = None
         self._target_tokens = config.get_retrieval("target_total_tokens", 2000)
         self._tokenizer = tiktoken.get_encoding("cl100k_base")
         self._user_prompts_path = Path(self._config.get("user_prompts_path", "./data/user_prompts.yaml"))
@@ -137,9 +146,19 @@ class Assembler:
         sender_nickname: str = "",
     ) -> AssemblyResult:
         """Sync entry point."""
+        import asyncio
         identity = self._resolve_identity(sender_id, sender_nickname)
         step_a_result = self._step_a.analyze(user_message, conversation_context)
-        return self._assemble_inner(step_a_result, user_message, conversation_context, sender_id, sender_nickname, identity)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            # Already in async context, can't use asyncio.run
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                return pool.submit(asyncio.run, self._assemble_inner(step_a_result, user_message, conversation_context, sender_id, sender_nickname, identity)).result()
+        return asyncio.run(self._assemble_inner(step_a_result, user_message, conversation_context, sender_id, sender_nickname, identity))
 
     async def assemble_async(
         self,
@@ -151,9 +170,9 @@ class Assembler:
         """Async entry point."""
         identity = self._resolve_identity(sender_id, sender_nickname)
         step_a_result = await self._step_a.analyze_async(user_message, conversation_context)
-        return self._assemble_inner(step_a_result, user_message, conversation_context, sender_id, sender_nickname, identity)
+        return await self._assemble_inner(step_a_result, user_message, conversation_context, sender_id, sender_nickname, identity)
 
-    def _assemble_inner(
+    async def _assemble_inner(
         self,
         step_a_result: StepAResult,
         user_message: str,
@@ -188,19 +207,29 @@ class Assembler:
             if kb_hits:
                 kb_text = "\n".join(f"【已知事实】{h}" for h in kb_hits)
 
-        # L3: Scene retrieval
+        # L3: Scene retrieval (Agentic — 迭代检索)
         if search_queries:
             content_query = search_queries[0] + " " + user_message
         else:
             content_query = user_message
 
-        # 内容检索
-        content_result = self._l3.retrieve(
-            query=content_query,
-            filter_tags=None,
-            topic_is_past=topic_is_past,
-            llm_keywords=llm_keywords,
-        )
+        if self._agentic:
+            content_result = await self._agentic.retrieve(
+                user_message=user_message,
+                initial_query=content_query,
+                initial_keywords=llm_keywords,
+                topic_is_past=topic_is_past,
+                character_name=self._config.get("character.name", ""),
+                identity=identity,
+                known_facts=kb_text,
+            )
+        else:
+            content_result = self._l3.retrieve(
+                query=content_query,
+                filter_tags=None,
+                topic_is_past=topic_is_past,
+                llm_keywords=llm_keywords,
+            )
 
         if identity:
             # 关系检索：额外独立检索，不占内容名额

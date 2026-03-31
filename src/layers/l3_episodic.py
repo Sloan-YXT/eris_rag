@@ -350,30 +350,38 @@ class L3EpisodicMemory:
         """用 where_document $contains 做原文精确匹配。
 
         使用 LLM 提取的 keywords（专有名词），直接 $contains 查询。
-        没有 keywords 时不做关键词搜索（纯语义）。
+        过滤主角名等超高频词（匹配所有 chunk 无检索价值）。
         """
-        keywords = [k for k in (llm_keywords or []) if len(k) >= 2]
+        # 主角名出现在几乎所有 chunk 里，搜它等于没搜
+        _HIGH_FREQ = {"艾莉丝", "艾丽丝", "鲁迪乌斯", "鲁迪", "格雷拉特",
+                      "洛琪希", "希露菲", "基列奴"}
+        keywords = [k for k in (llm_keywords or []) if len(k) >= 2 and k not in _HIGH_FREQ]
         if not keywords:
             return []
 
         seen_ids: set[str] = set()
         output: list[dict] = []
 
+        # 用 query embedding 做语义排序（关键词匹配 + 语义相关性）
+        query_embedding = self._embed_model.encode_query(query).tolist()
+
         for kw in keywords:
             try:
-                results = self._collection.get(
+                # query + where_document：精确包含关键词 且 按语义相关性排序
+                results = self._collection.query(
+                    query_embeddings=[query_embedding],
                     where_document={"$contains": kw},
-                    include=["documents", "metadatas"],
-                    limit=top_k,
+                    n_results=top_k,
+                    include=["documents", "metadatas", "distances"],
                 )
             except Exception:
                 continue
 
-            if not results["ids"]:
+            if not results["ids"] or not results["ids"][0]:
                 continue
 
             for doc_id, doc, meta in zip(
-                results["ids"], results["documents"], results["metadatas"],
+                results["ids"][0], results["documents"][0], results["metadatas"][0],
             ):
                 if doc_id in seen_ids:
                     continue
@@ -386,7 +394,7 @@ class L3EpisodicMemory:
                     "significance": meta.get("significance", 0.0),
                     "summary": doc[:100],
                     "text": doc,
-                    "score": 0.5,  # 关键词命中给固定分，交给 reranker 精排
+                    "score": 0.5,  # 关键词命中基础分
                     "match_type": "keyword",
                 })
 

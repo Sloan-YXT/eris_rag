@@ -16,9 +16,12 @@ logger = logging.getLogger(__name__)
 class EmbeddingModel:
     """Wrapper around sentence-transformers for BGE-large-zh-v1.5."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, use_train_device: bool = False):
         self._model_name = config.embedding_model
-        self._device = config.embedding_device
+        if use_train_device:
+            self._device = config.get("embedding.train_device", config.embedding_device)
+        else:
+            self._device = config.embedding_device
         self._batch_size = config.get("embedding.batch_size", 64)
         self._model = None  # SentenceTransformer instance, loaded lazily
 

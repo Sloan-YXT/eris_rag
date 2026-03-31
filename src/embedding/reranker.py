@@ -14,9 +14,12 @@ logger = logging.getLogger(__name__)
 class Reranker:
     """Cross-encoder reranker (默认 BGE-reranker-v2-m3)。"""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, use_train_device: bool = False):
         self._model_name = config.reranker_model
-        self._device = config.reranker_device
+        if use_train_device:
+            self._device = config.get("reranker.train_device", config.reranker_device)
+        else:
+            self._device = config.reranker_device
         self._model = None
 
     def load(self) -> None:

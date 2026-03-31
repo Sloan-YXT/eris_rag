@@ -148,14 +148,20 @@ async def retrieve(req: RetrieveRequest, background_tasks: BackgroundTasks):
     # 异步提取潜意识记忆（不阻塞响应）
     if _subconscious and _subconscious.enabled and req.user_message:
         identity = _assembler._resolve_identity(req.sender_id, req.sender_nickname)
-        background_tasks.add_task(
-            _subconscious.extract_and_store,
-            sender_id=req.sender_id,
-            identity=identity,
-            user_message=req.user_message,
-            bot_reply="",  # 此时还没有 bot 回复
-            conversation_context=req.conversation_context,
-        )
+
+        async def _safe_extract():
+            try:
+                await _subconscious.extract_and_store(
+                    sender_id=req.sender_id,
+                    identity=identity,
+                    user_message=req.user_message,
+                    bot_reply="",
+                    conversation_context=req.conversation_context,
+                )
+            except Exception as e:
+                logger.error(f"[subconscious] background task failed: {e}")
+
+        background_tasks.add_task(_safe_extract)
 
     # Debug: 打印完整 system_prompt
     meta = result.metadata
@@ -319,6 +325,8 @@ async def _run_ingest(stage: str):
 
 def main():
     """Run the server via uvicorn."""
+    import signal
+    import sys
     import uvicorn
 
     config = Config()
@@ -334,12 +342,32 @@ def main():
     logging.getLogger("chromadb").setLevel(logging.WARNING)
     logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
     logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
-    uvicorn.run(
-        "src.server:app",
-        host=config.server_host,
-        port=config.server_port,
-        reload=False,
-    )
+
+    # 捕获退出信号，打印原因
+    def _on_signal(sig, frame):
+        logger.error(f"Received signal {sig}, shutting down")
+        sys.exit(1)
+
+    signal.signal(signal.SIGINT, _on_signal)
+    signal.signal(signal.SIGTERM, _on_signal)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _on_signal)
+
+    import atexit
+    atexit.register(lambda: logger.error("SERVER PROCESS EXITING (atexit)"))
+
+    try:
+        uvicorn.run(
+            "src.server:app",
+            host=config.server_host,
+            port=config.server_port,
+            reload=False,
+            timeout_keep_alive=0,
+        )
+    except Exception as e:
+        logger.error(f"uvicorn.run() exception: {e}", exc_info=True)
+    finally:
+        logger.error("main() function ending")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,38 @@
+2026-03-30 18:29:52,139 asyncio DEBUG Using proactor: IocpProactor
+INFO:     Started server process [53952]
+INFO:     Waiting for application startup.
+2026-03-30 18:29:55,745 datasets DEBUG PyTorch version 2.10.0+cu128 available.
+2026-03-30 18:29:55,952 src.embedding.embed_model INFO Loading embedding model BAAI/bge-large-zh-v1.5 on cpu
+Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights: 100%|¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€| 391/391 [00:00<00:00, 53076.99it/s]
+[1mBertModel LOAD REPORT[0m from: BAAI/bge-large-zh-v1.5
+Key                     | Status     |  | 
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED |  | 
+
+[3mNotes:
+- UNEXPECTED[3m	:can be ignored when loading from different task/architecture; not ok if you expect identical arch.[0m
+2026-03-30 18:30:03,937 src.embedding.embed_model INFO Embedding model loaded
+2026-03-30 18:30:03,937 src.embedding.reranker INFO Loading reranker BAAI/bge-reranker-v2-m3 on cpu
+Loading weights:   0%|          | 0/393 [00:00<?, ?it/s]Loading weights: 100%|¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€| 393/393 [00:00<00:00, 12294.23it/s]
+2026-03-30 18:30:08,734 src.embedding.reranker INFO Reranker loaded
+2026-03-30 18:30:08,805 src.layers.l2_behavior INFO Loaded 26 rules, 1 always-rules, 29 tag entries
+2026-03-30 18:30:08,807 src.layers.l1_core INFO Loaded 6 L1 identity modules: ['combat', 'core', 'growth', 'pride', 'relationship', 'vulnerability']
+D:\miniconda3\Lib\site-packages\jieba\_compat.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+Building prefix dict from the default dictionary ...
+2026-03-30 18:30:08,860 jieba DEBUG Building prefix dict from the default dictionary ...
+Loading model from cache C:\Users\Admin\AppData\Local\Temp\jieba.cache
+2026-03-30 18:30:08,860 jieba DEBUG Loading model from cache C:\Users\Admin\AppData\Local\Temp\jieba.cache
+Loading model cost 0.270 seconds.
+2026-03-30 18:30:09,130 jieba DEBUG Loading model cost 0.270 seconds.
+Prefix dict has been built successfully.
+2026-03-30 18:30:09,130 jieba DEBUG Prefix dict has been built successfully.
+2026-03-30 18:30:09,131 src.layers.step_a INFO StepA loaded, mode=deepseek-v3, 96 keywords, 61 tags
+2026-03-30 18:30:09,133 src.server INFO Subconscious memory system enabled
+2026-03-30 18:30:09,831 src.layers.knowledge_base INFO ÖªÊ¶¿âÖØ½¨Íê³É: 8 Ìõ
+2026-03-30 18:30:09,833 src.server INFO Knowledge base loaded: 8 entries
+2026-03-30 18:30:09,909 src.layers.assembler INFO user_prompts.yaml reloaded (mtime=1774416756.5455358)
+2026-03-30 18:30:09,909 src.server INFO Server startup complete
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8787 (Press CTRL+C to quit)
+INFO:     127.0.0.1:58302 - "GET /health HTTP/1.1" 200 OK

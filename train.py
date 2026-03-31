@@ -81,7 +81,7 @@ def step_chunk(config):
         periods[c.period] = periods.get(c.period, 0) + 1
     logger.info(f"  各时期: {periods}")
 
-    embed_model = EmbeddingModel(config)
+    embed_model = EmbeddingModel(config, use_train_device=True)
     embed_model.load()
 
     l3 = L3EpisodicMemory(config, embed_model)
@@ -102,7 +102,7 @@ async def step_annotate(config):
     from src.layers.l3_episodic import L3EpisodicMemory
     from src.preprocess.annotator import annotate_tags, annotate_significance
 
-    embed_model = EmbeddingModel(config)
+    embed_model = EmbeddingModel(config, use_train_device=True)
     embed_model.load()
     l3 = L3EpisodicMemory(config, embed_model)
 
@@ -135,7 +135,7 @@ async def step_reduce_l2(config):
     from src.layers.l3_episodic import L3EpisodicMemory
     from src.preprocess.reduce_l2 import reduce_rules_from_rag
 
-    embed_model = EmbeddingModel(config)
+    embed_model = EmbeddingModel(config, use_train_device=True)
     embed_model.load()
     l3 = L3EpisodicMemory(config, embed_model)
 
@@ -211,7 +211,7 @@ def rebuild_memory(config):
     """重建所有用户的潜意识向量库。"""
     from src.embedding.embed_model import EmbeddingModel
     from src.layers.subconscious import SubconsciousMemory
-    embed_model = EmbeddingModel(config)
+    embed_model = EmbeddingModel(config, use_train_device=True)
     embed_model.load()
     sc = SubconsciousMemory(config, embed_model)
     sc.rebuild_all()
