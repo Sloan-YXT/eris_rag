@@ -229,7 +229,8 @@ class L3EpisodicMemory:
             period_weight = weights.get(period, 1.0)
             sig = meta.get("significance", 0.0)
             sig_boost = 1.0 + sig * 0.5
-            weighted_score = similarity * period_weight * sig_boost
+            source_weight = meta.get("source_weight", 1.0)
+            weighted_score = similarity * period_weight * sig_boost * source_weight
             scored.append((idx, doc_id, doc, meta, weighted_score))
 
         scored.sort(key=lambda x: x[4], reverse=True)
@@ -405,10 +406,11 @@ class L3EpisodicMemory:
     # 文本匹配判断是否涉及艾莉丝
     _ERIS_NAMES = {"艾莉丝", "エリス", "Eris", "艾丽丝"}
 
-    @classmethod
-    def _chunk_to_metadata(cls, chunk: Chunk) -> dict:
+    def _chunk_to_metadata(self, chunk: Chunk) -> dict:
         """构建 ChromaDB metadata。has_eris 入库时直接文本匹配判断。"""
-        has_eris = any(name in chunk.raw_text for name in cls._ERIS_NAMES)
+        has_eris = any(name in chunk.raw_text for name in self._ERIS_NAMES)
+        # 来源优先级
+        source_weight = self._get_source_weight(chunk.source_file)
         return {
             "volume": chunk.volume,
             "chapter": chunk.chapter,
@@ -416,9 +418,20 @@ class L3EpisodicMemory:
             "period_weight": chunk.period_weight,
             "char_offset": chunk.char_offset,
             "has_eris": has_eris,
-            "situation_tags": "",      # Phase 2 标注后填充
-            "significance": 0.0,       # Phase 2 核心记忆标注后填充 (0-1)
+            "source_weight": source_weight,
+            "situation_tags": "",
+            "significance": 0.0,
         }
+
+    def _get_source_weight(self, filename: str) -> float:
+        """根据文件名判断来源权重。"""
+        main_patterns = self._config.get("source_priority.main_patterns", [])
+        main_weight = self._config.get("source_priority.main_weight", 1.0)
+        extra_weight = self._config.get("source_priority.extra_weight", 0.8)
+        for pattern in main_patterns:
+            if pattern in filename:
+                return main_weight
+        return extra_weight if main_patterns else 1.0
 
     @staticmethod
     def _build_tag_filter(tags: list[str]) -> dict | None:

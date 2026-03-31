@@ -81,6 +81,10 @@ def parse_novel_to_chunks(
     period_map, weight_map = _load_period_config(taxonomy_path)
     raw_chapters = _split_chapters(lines)
 
+    # 没有找到卷标记时，把整个文件当作一个章节（蛇足篇等番外）
+    if not raw_chapters:
+        raw_chapters = [(99, 0, txt_path.stem, lines)]
+
     all_chunks: list[Chunk] = []
     global_seq = 0
 
@@ -108,6 +112,7 @@ def parse_novel_to_chunks(
                 chapter=chap_idx,
                 chunk_index=global_seq,
                 char_offset=tc.char_offset,
+                source_file=Path(txt_path).name,
                 period=period,
                 period_weight=weight,
             )

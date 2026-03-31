@@ -78,12 +78,31 @@ class SubconsciousMemory:
 
     # ── 检索（同步，在 L4 阶段调用）──────────────────────────
 
-    def retrieve(self, sender_id: str, query: str) -> str:
+    def _memory_key(self, sender_id: str, identity: str = "") -> str:
+        """生成记忆键：sender_id_identity，同一个QQ号不同身份记忆隔离。
+        JSON 文件名用中文（可读），ChromaDB collection 名用 hash（兼容）。
+        """
+        if identity:
+            import re
+            safe_name = re.sub(r'[^\w\u4e00-\u9fff]', '', identity)
+            return f"{sender_id}_{safe_name}"
+        return sender_id
+
+    def _collection_name(self, sender_id: str, identity: str = "") -> str:
+        """生成 ChromaDB collection 名（只允许 ASCII）。"""
+        import hashlib
+        key = self._memory_key(sender_id, identity)
+        # 中文 hash 成短字符串
+        short_hash = hashlib.md5(key.encode()).hexdigest()[:12]
+        return f"{self._collection_prefix}_{short_hash}"
+
+    def retrieve(self, sender_id: str, query: str, identity: str = "") -> str:
         """检索与当前对话相关的潜意识记忆。
 
         Args:
             sender_id: 用户 QQ 号
             query: 当前对话上下文（用于语义匹配）
+            identity: 用户当前身份名（同QQ号不同身份记忆隔离）
 
         Returns:
             格式化的记忆文本，直接注入 system_prompt。
@@ -91,7 +110,7 @@ class SubconsciousMemory:
         if not self._enabled or not sender_id or sender_id == "default":
             return ""
 
-        collection_name = f"{self._collection_prefix}_{sender_id}"
+        collection_name = self._collection_name(sender_id, identity)
         try:
             collection = self._chroma.get_collection(collection_name)
         except Exception:
@@ -180,16 +199,17 @@ class SubconsciousMemory:
             return False
 
         # 存储 + 重建向量
-        self._store_memory(sender_id, memory_text)
-        self._rebuild_collection(sender_id)
+        key = self._memory_key(sender_id, identity)
+        self._store_memory(key, memory_text)
+        self._rebuild_collection(key)
 
         logger.info(f"潜意识记忆存入 [{sender_id}]: {memory_text}")
         return True
 
     # ── 持久化 ───────────────────────────────────────────────
 
-    def _get_storage_path(self, sender_id: str) -> Path:
-        return self._storage_dir / f"{sender_id}.json"
+    def _get_storage_path(self, key: str) -> Path:
+        return self._storage_dir / f"{key}.json"
 
     def _load_memories(self, sender_id: str) -> list[dict]:
         path = self._get_storage_path(sender_id)
@@ -213,9 +233,11 @@ class SubconsciousMemory:
 
     # ── 向量库管理 ────────────────────────────────────────────
 
-    def _rebuild_collection(self, sender_id: str) -> None:
+    def _rebuild_collection(self, key: str) -> None:
         """重建某个用户的潜意识向量 collection。"""
-        collection_name = f"{self._collection_prefix}_{sender_id}"
+        import hashlib
+        short_hash = hashlib.md5(key.encode()).hexdigest()[:12]
+        collection_name = f"{self._collection_prefix}_{short_hash}"
 
         # 删除旧的
         try:

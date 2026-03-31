@@ -11,8 +11,8 @@ import sys
 import httpx
 
 RAG_URL = "http://localhost:8787"
-SENDER_ID = "0000000000"
-SENDER_NICKNAME = "鲁迪乌斯"
+SENDER_ID = "649535675"
+SENDER_NICKNAME = "奥贝尔"
 
 # 用哪个 provider 生成艾莉丝的回复
 # 从 config 读取，或直接指定

@@ -213,15 +213,29 @@ class Assembler:
         else:
             content_query = user_message
 
+        # 提前解析用户关系，给 agentic 用
+        user_prompt = self._get_user_prompt(sender_id, sender_nickname)
+
         if self._agentic:
+            # 把知识库 + 用户关系描述一起给 agent 作为已知信息
+            agent_facts = kb_text
+            if user_prompt:
+                identity_info = f"对话对象「{identity}」的信息：{user_prompt}"
+                agent_facts = f"## 对话对象信息\n{identity_info}\n\n{agent_facts}" if agent_facts else f"## 对话对象信息\n{identity_info}"
+            # 拼接历史上下文给 agentic，让它理解"然后呢"之类的追问
+            agentic_message = user_message
+            if conversation_context:
+                recent = conversation_context[-8:]
+                agentic_message = "\n".join(recent) + "\n" + user_message
+
             content_result = await self._agentic.retrieve(
-                user_message=user_message,
+                user_message=agentic_message,
                 initial_query=content_query,
                 initial_keywords=llm_keywords,
                 topic_is_past=topic_is_past,
                 character_name=self._config.get("character.name", ""),
                 identity=identity,
-                known_facts=kb_text,
+                known_facts=agent_facts,
             )
         else:
             content_result = self._l3.retrieve(
@@ -281,12 +295,12 @@ class Assembler:
             sc_query = user_message
             if conversation_context:
                 sc_query = " ".join(conversation_context[-3:]) + " " + user_message
-            subconscious_text = self._subconscious.retrieve(sender_id, sc_query)
+            subconscious_text = self._subconscious.retrieve(sender_id, sc_query, identity=identity)
 
         if subconscious_text:
             l4_text = l4_text + "\n" + subconscious_text if l4_text else subconscious_text
 
-        user_prompt = self._get_user_prompt(sender_id, sender_nickname)
+        # user_prompt 已在前面解析过
 
         # Assemble with token budget enforcement
         # 知识库结果拼在 L3 前面（优先级更高）

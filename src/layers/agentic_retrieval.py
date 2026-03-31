@@ -20,12 +20,11 @@ logger = logging.getLogger(__name__)
 EVAL_SYSTEM = "你是一个信息检索与推理评估模块。请严格按 JSON 格式输出。"
 
 EVAL_PROMPT = """\
-系统从小说原文中检索到了一些片段，请尝试仅根据这些片段回答用户的问题。
+请根据下方所有可用信息回答用户的问题。可用信息包括：对话场景、已知事实、检索到的原文片段。
 
 ## 对话场景
-角色：{character_name}（被扮演的角色）
-对话对象：{identity}
-用户的消息是对{character_name}说的。
+角色：{character_name}（被扮演的角色，对话中的"你"）
+对话对象：{identity}（发消息的人，对话中的"我"）
 
 ## 用户问题
 {user_message}
@@ -39,8 +38,12 @@ EVAL_PROMPT = """\
    b. 分离了多久？
    c. 计算：分离年龄 + 分离时长 = 结婚年龄
 2. 检查已有片段能回答哪些子问题（注意仔细阅读每个片段）
-3. 如果所有子问题都能回答（直接或推理）→ sufficient。推理得出的结论也算回答，不需要原文逐字确认
-4. 如果某个子问题缺信息，针对那个子问题生成检索词
+3. 判断回答是否完整。用以下检查清单：
+   - 事件的起因、经过、结果都有了吗？
+   - 涉及人物关系变化时，后续发展（怀孕、结婚、分手、和好等）查了吗？
+   - 如果你是听这件事的人，还会追问什么？那就是还缺的信息
+4. 如果所有子问题都能完整回答（直接或推理）→ sufficient
+5. 如果缺信息，针对那个子问题生成检索词
 
 ## 搜索机制说明
 new_queries 走语义向量匹配（意思相近就能找到）。
@@ -63,8 +66,10 @@ class AgenticRetrieval:
         self._config = config
         self._l3 = l3
         self._max_iterations = max_iterations
-        self._max_fragments = 15  # 评估时最多传几个片段
-        self._provider = config.get("agentic.provider", config.get_runtime_provider("step_a"))
+        self._max_fragments = config.get("agentic.max_fragments", 15)
+        self._search_top_k = config.get("agentic.search_top_k", 15)
+        self._provider_first = config.get("agentic.provider_first", config.get_runtime_provider("step_a"))
+        self._provider_rest = config.get("agentic.provider_rest", config.get_runtime_provider("step_a"))
 
     async def retrieve(
         self,
@@ -81,10 +86,11 @@ class AgenticRetrieval:
         all_scene_ids: list[str] = []
         all_fragments: dict[str, str] = {}
 
-        # 第 1 轮检索
+        # 第 1 轮检索（大 top_k，让 agent 看到更多候选）
         result = self._l3.retrieve(
             query=initial_query, filter_tags=None,
             topic_is_past=topic_is_past, llm_keywords=initial_keywords,
+            top_k=self._search_top_k,
         )
         self._collect(result, all_scene_ids, all_fragments)
 
@@ -104,9 +110,10 @@ class AgenticRetrieval:
                 eval_context = f"## 已知事实（优先级最高）\n{known_facts}\n\n"
             eval_context += fragments_text
 
+            provider = self._provider_first if iteration == 0 else self._provider_rest
             eval_result = await self._evaluate(
                 user_message, eval_context, len(top_frags),
-                character_name, identity,
+                character_name, identity, provider=provider,
             )
 
             if eval_result is None or eval_result.get("sufficient", True):
@@ -135,6 +142,7 @@ class AgenticRetrieval:
                 new_result = self._l3.retrieve(
                     query=q, filter_tags=None,
                     topic_is_past=topic_is_past, llm_keywords=new_keywords,
+                    top_k=self._search_top_k,
                 )
                 if self._collect(new_result, all_scene_ids, all_fragments):
                     found_new = True
@@ -199,7 +207,8 @@ class AgenticRetrieval:
         return "\n\n".join(parts)
 
     async def _evaluate(self, user_message: str, all_fragments: str,
-                        fragment_count: int, character_name: str, identity: str) -> dict | None:
+                        fragment_count: int, character_name: str, identity: str,
+                        provider: str = "") -> dict | None:
         from src.llm.client import LLMClient
 
         prompt = EVAL_PROMPT.replace("{character_name}", character_name or "角色")
@@ -211,7 +220,7 @@ class AgenticRetrieval:
         client = LLMClient(self._config)
         try:
             response = await client.complete(
-                provider=self._provider,
+                provider=provider or self._provider_first,
                 system_prompt=EVAL_SYSTEM,
                 user_prompt=prompt,
                 temperature=0.1,

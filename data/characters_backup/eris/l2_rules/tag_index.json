@@ -1,0 +1,142 @@
+{
+  "被小看": [
+    "beh_core_001",
+    "beh_vulnerability_001",
+    "beh_vulnerability_005",
+    "beh_pride_001",
+    "beh_pride_003"
+  ],
+  "比试": [
+    "beh_core_001",
+    "beh_pride_002"
+  ],
+  "学习": [
+    "beh_core_001",
+    "beh_vulnerability_001",
+    "beh_combat_003"
+  ],
+  "保护": [
+    "beh_core_002",
+    "beh_combat_002",
+    "beh_relationship_001",
+    "beh_relationship_003"
+  ],
+  "对鲁迪乌斯": [
+    "beh_core_002",
+    "beh_core_003",
+    "beh_vulnerability_003",
+    "beh_vulnerability_005",
+    "beh_combat_002",
+    "beh_relationship_001",
+    "beh_relationship_002",
+    "beh_relationship_004",
+    "beh_pride_004",
+    "beh_growth_003"
+  ],
+  "对弱者": [
+    "beh_core_002",
+    "beh_relationship_003",
+    "beh_growth_001"
+  ],
+  "心动": [
+    "beh_core_003",
+    "beh_relationship_004",
+    "beh_growth_003"
+  ],
+  "害羞": [
+    "beh_core_003"
+  ],
+  "战斗": [
+    "beh_core_004",
+    "beh_combat_001",
+    "beh_combat_002",
+    "beh_growth_004"
+  ],
+  "练剑": [
+    "beh_core_004",
+    "beh_combat_003",
+    "beh_growth_001"
+  ],
+  "遇强敌": [
+    "beh_core_004",
+    "beh_vulnerability_002",
+    "beh_combat_004",
+    "beh_growth_004"
+  ],
+  "无力感": [
+    "beh_vulnerability_001",
+    "beh_vulnerability_003"
+  ],
+  "恐惧": [
+    "beh_vulnerability_002",
+    "beh_pride_003",
+    "beh_growth_004"
+  ],
+  "对陌生人": [
+    "beh_vulnerability_002",
+    "beh_relationship_002",
+    "beh_growth_002"
+  ],
+  "竞争": [
+    "beh_vulnerability_003",
+    "beh_combat_001",
+    "beh_combat_003",
+    "beh_combat_004",
+    "beh_relationship_002",
+    "beh_pride_002"
+  ],
+  "失去": [
+    "beh_vulnerability_004"
+  ],
+  "对家人": [
+    "beh_vulnerability_004"
+  ],
+  "逞强": [
+    "beh_vulnerability_004",
+    "beh_vulnerability_005",
+    "beh_pride_003"
+  ],
+  "受伤": [
+    "beh_vulnerability_005"
+  ],
+  "攻击": [
+    "beh_combat_001",
+    "beh_combat_004",
+    "beh_relationship_003",
+    "beh_pride_001",
+    "beh_pride_002",
+    "beh_growth_002"
+  ],
+  "被关心": [
+    "beh_relationship_001",
+    "beh_growth_003"
+  ],
+  "嫉妒": [
+    "beh_relationship_002"
+  ],
+  "愤怒": [
+    "beh_relationship_003",
+    "beh_pride_001"
+  ],
+  "亲密关系": [
+    "beh_relationship_004"
+  ],
+  "羞耻": [
+    "beh_relationship_004"
+  ],
+  "被夸奖": [
+    "beh_pride_004"
+  ],
+  "自豪": [
+    "beh_pride_004"
+  ],
+  "教导": [
+    "beh_growth_001"
+  ],
+  "冲突": [
+    "beh_growth_002"
+  ],
+  "always": [
+    "speech_style"
+  ]
+}

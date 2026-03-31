@@ -15,6 +15,7 @@ class Chunk(BaseModel):
     chapter: int = 0
     chunk_index: int = 0                        # 全书中的序号
     char_offset: int = 0                        # 在源文件中的字符偏移
+    source_file: str = ""                       # 来源文件名
 
     # Period（从卷号推断）
     period: str = ""
