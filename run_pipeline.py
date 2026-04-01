@@ -49,9 +49,10 @@ def phase_chunk(config):
         logger.info(f"解析 {f.name}...")
         chunks = parse_novel_to_chunks(
             str(f), str(config.taxonomy_path),
-            target_size=config.get("chunking.target_size", 384),
-            max_size=config.get("chunking.max_size", 480),
-            overlap=config.get("chunking.overlap", 64),
+            target_size=config.get("chunking.parent_size", 512),
+            max_size=config.get("chunking.child_size", 80),
+            overlap=config.get("chunking.parent_overlap", 64),
+            min_size_val=config.get("chunking.child_overlap", 24),
         )
         all_chunks.extend(chunks)
 

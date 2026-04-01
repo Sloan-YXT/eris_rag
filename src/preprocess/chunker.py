@@ -58,21 +58,23 @@ class ChapterChunk:
 def parse_novel_to_chunks(
     txt_path: str | Path,
     taxonomy_path: str | Path | None = None,
-    target_size: int = 384,
-    max_size: int = 480,
+    target_size: int = 512,
+    max_size: int = 80,
     overlap: int = 64,
+    min_size_val: int = 24,
 ) -> list[Chunk]:
-    """解析小说文件，输出可直接 embed 的 Chunk 列表。
+    """解析小说文件，输出父子块 Chunk 列表。
 
     Args:
         txt_path: 小说 TXT 文件路径。
-        taxonomy_path: tags_taxonomy.yaml 路径（用于卷号→时期映射）。
-        target_size: 目标块大小（字符）。
-        max_size: 最大块大小（字符）。
-        overlap: 重叠字符数。
+        taxonomy_path: tags_taxonomy.yaml 路径。
+        target_size: 父块大小（字符）。
+        max_size: 子块大小（字符）。
+        overlap: 父块重叠。
+        min_size_val: 子块重叠。
 
     Returns:
-        Chunk 列表，每个 chunk.raw_text 就是 embedding 的输入。
+        Chunk 列表（父块 + 子块混合，子块有 parent_id）。
     """
     txt_path = Path(txt_path)
     text = txt_path.read_text(encoding="utf-8")
@@ -96,27 +98,50 @@ def parse_novel_to_chunks(
         period = _get_period(vol, period_map)
         weight = weight_map.get(period, 1.0)
 
-        # 用 text_chunker 做固定窗口分块
-        text_chunks = chunk_text(
+        # 父子块切分
+        from src.preprocess.text_chunker import chunk_text_parent_child
+        pc_results = chunk_text_parent_child(
             cleaned,
-            target_size=target_size,
-            max_size=max_size,
-            overlap=overlap,
+            parent_size=target_size,      # 现在是 parent_size
+            parent_overlap=overlap,       # 现在是 parent_overlap
+            child_size=max_size,          # 现在是 child_size
+            child_overlap=min_size_val,   # 现在是 child_overlap
         )
 
-        for tc in text_chunks:
-            chunk = Chunk(
-                id=f"v{vol:02d}_ch{chap_idx:02d}_{global_seq:04d}",
-                raw_text=tc.text,
+        for pc in pc_results:
+            parent_id = f"v{vol:02d}_c{chap_idx:02d}_{global_seq:04d}"
+            # 父块（存原文，检索命中后返回这个）
+            parent_chunk = Chunk(
+                id=parent_id,
+                raw_text=pc.parent.text,
                 volume=vol,
                 chapter=chap_idx,
                 chunk_index=global_seq,
-                char_offset=tc.char_offset,
+                char_offset=pc.parent.char_offset,
                 source_file=Path(txt_path).name,
                 period=period,
                 period_weight=weight,
+                is_child=False,
             )
-            all_chunks.append(chunk)
+            all_chunks.append(parent_chunk)
+
+            # 子块（embed 用，搜索用）
+            for sub_idx, child in enumerate(pc.children):
+                child_chunk = Chunk(
+                    id=f"{parent_id}_s{sub_idx:02d}",
+                    raw_text=child.text,
+                    volume=vol,
+                    chapter=chap_idx,
+                    chunk_index=global_seq,
+                    char_offset=child.char_offset,
+                    source_file=Path(txt_path).name,
+                    period=period,
+                    period_weight=weight,
+                    parent_id=parent_id,
+                    is_child=True,
+                )
+                all_chunks.append(child_chunk)
+
             global_seq += 1
 
     return all_chunks

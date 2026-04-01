@@ -76,19 +76,42 @@ class L3EpisodicMemory:
     # ── 入库 ─────────────────────────────────────────────────
 
     def ingest_chunks(self, chunks: list[Chunk], batch_size: int = 64) -> int:
-        """将原文分块 embed 并存入 ChromaDB。
+        """父子块入库：子块 embed 存入主 collection，父块存入 _parents collection。
 
         Returns:
-            新增条目数（跳过已存在的）。
+            新增子块数。
         """
+        # 分离父块和子块
+        parents = [c for c in chunks if not c.is_child]
+        children = [c for c in chunks if c.is_child]
+
+        # 存父块到 _parents collection（不做 embed，只存原文）
+        if parents:
+            parent_collection = self._client.get_or_create_collection(
+                name=self._config.vectordb_collection + "_parents",
+            )
+            existing_parent_ids = set(parent_collection.get()["ids"]) if parent_collection.count() > 0 else set()
+            new_parents = [p for p in parents if p.id not in existing_parent_ids]
+            if new_parents:
+                # 分批存父块（ChromaDB 单次上限 ~5000）
+                for i in range(0, len(new_parents), batch_size):
+                    pb = new_parents[i:i + batch_size]
+                    parent_collection.add(
+                        ids=[p.id for p in pb],
+                        documents=[p.raw_text for p in pb],
+                        metadatas=[self._chunk_to_metadata(p) for p in pb],
+                    )
+                logger.info(f"父块入库: {len(new_parents)} 个")
+
+        # 子块 embed 存入主 collection
         existing_ids = set(self._collection.get()["ids"]) if self._collection.count() > 0 else set()
-        new_chunks = [c for c in chunks if c.id not in existing_ids]
+        new_chunks = [c for c in children if c.id not in existing_ids]
 
         if not new_chunks:
-            logger.info("没有新的 chunk 需要入库")
+            logger.info("没有新的子块需要入库")
             return 0
 
-        logger.info(f"入库 {len(new_chunks)} 个 chunks（跳过 {len(chunks) - len(new_chunks)} 个已存在）")
+        logger.info(f"子块入库 {len(new_chunks)} 个（跳过 {len(children) - len(new_chunks)} 个已存在）")
 
         for i in range(0, len(new_chunks), batch_size):
             batch = new_chunks[i:i + batch_size]
@@ -212,6 +235,8 @@ class L3EpisodicMemory:
                     "chapter": kw_hit["chapter"],
                     "period": kw_hit.get("period", ""),
                     "significance": kw_hit.get("significance", 0.0),
+                    "parent_id": kw_hit.get("parent_id", ""),
+                    "source_weight": kw_hit.get("source_weight", 1.0),
                 })
                 distances.append(0.5)
 
@@ -257,10 +282,19 @@ class L3EpisodicMemory:
         final = keyword_entries[:kw_slots] + reranked_entries
         kw_id_set = {e[0] for e in keyword_entries[:kw_slots]}
 
-        # 格式化输出
+        # 格式化输出（子块展开为父块）
         prompt_parts = []
         scene_ids = []
+        seen_parents: set[str] = set()  # 去重：同一个父块只返回一次
         for doc_id, doc, meta, score in final:
+            parent_id = meta.get("parent_id", "")
+            # 如果是子块，展开为父块内容
+            if parent_id:
+                if parent_id in seen_parents:
+                    continue  # 同一个父块已返回，跳过
+                seen_parents.add(parent_id)
+                doc = self._get_parent_text(parent_id) or doc  # 找不到父块就用子块原文
+                doc_id = parent_id
             scene_ids.append(doc_id)
             period = meta.get("period", "")
             target_period = self._config.target_period
@@ -393,6 +427,8 @@ class L3EpisodicMemory:
                     "chapter": meta.get("chapter", 0),
                     "period": meta.get("period", ""),
                     "significance": meta.get("significance", 0.0),
+                    "parent_id": meta.get("parent_id", ""),
+                    "source_weight": meta.get("source_weight", 1.0),
                     "summary": doc[:100],
                     "text": doc,
                     "score": 0.5,  # 关键词命中基础分
@@ -405,6 +441,19 @@ class L3EpisodicMemory:
 
     # 文本匹配判断是否涉及艾莉丝
     _ERIS_NAMES = {"艾莉丝", "エリス", "Eris", "艾丽丝"}
+
+    def _get_parent_text(self, parent_id: str) -> str | None:
+        """从 parents collection 获取父块原文。"""
+        try:
+            parent_col = self._client.get_collection(
+                name=self._config.vectordb_collection + "_parents",
+            )
+            result = parent_col.get(ids=[parent_id], include=["documents"])
+            if result["ids"] and result["documents"]:
+                return result["documents"][0]
+        except Exception:
+            pass
+        return None
 
     def _chunk_to_metadata(self, chunk: Chunk) -> dict:
         """构建 ChromaDB metadata。has_eris 入库时直接文本匹配判断。"""
@@ -419,6 +468,7 @@ class L3EpisodicMemory:
             "char_offset": chunk.char_offset,
             "has_eris": has_eris,
             "source_weight": source_weight,
+            "parent_id": chunk.parent_id,
             "situation_tags": "",
             "significance": 0.0,
         }

@@ -203,9 +203,13 @@ async def query(req: QueryRequest):
 async def reset(req: dict):
     """Reset L4 session state for a user."""
     sender_id = req.get("sender_id", "")
-    if sender_id and _l4:
-        _l4.reset(sender_id)
-        logger.info(f"[/reset] session reset for {sender_id}")
+    identity = ""
+    if sender_id and _assembler:
+        identity = _assembler._resolve_identity(sender_id, req.get("sender_nickname", ""))
+    l4_key = f"{sender_id}_{identity}" if identity else sender_id
+    if l4_key and _l4:
+        _l4.reset(l4_key)
+        logger.info(f"[/reset] session reset for {l4_key}")
     return {"status": "ok"}
 
 

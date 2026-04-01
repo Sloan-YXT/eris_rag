@@ -30,7 +30,8 @@ META_INSTRUCTION = """## 元指令
 - 如果以上内容中完全没有相关信息，就坦率地说不知道或不清楚，不要编造
 - 语气、用词要符合角色的说话风格
 - 不要打破角色，不要提及自己是AI
-- 回复长度适中，像真实对话一样自然"""
+- 回复长度适中，像真实对话一样自然
+- 上方的推理结论和原文片段是给你参考的内部资料，回复时不要提及"小说""原文""片段"等词，把信息转化为角色自身的记忆和口吻来表达"""
 
 
 class Assembler:
@@ -209,7 +210,7 @@ class Assembler:
 
         # L3: Scene retrieval (Agentic — 迭代检索)
         if search_queries:
-            content_query = search_queries[0] + " " + user_message
+            content_query = " ".join(search_queries) + " " + user_message
         else:
             content_query = user_message
 
@@ -279,14 +280,15 @@ class Assembler:
         else:
             l3_result = content_result
 
-        # L4: Update session state
+        # L4: Update session state（按 sender_id + identity 隔离）
+        l4_key = f"{sender_id}_{identity}" if identity else sender_id
         self._l4.update(
-            user_id=sender_id,
+            user_id=l4_key,
             emotion_hint=emotion_hint,
             triggers=triggers,
             user_message=user_message,
         )
-        l4_text = self._l4.format_state(sender_id)
+        l4_text = self._l4.format_state(l4_key)
 
         # 潜意识记忆检索（向量搜索，和 L3 并行但独立）
         subconscious_text = ""

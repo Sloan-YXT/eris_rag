@@ -42,20 +42,32 @@ EVAL_PROMPT = """\
    - 事件的起因、经过、结果都有了吗？
    - 涉及人物关系变化时，后续发展（怀孕、结婚、分手、和好等）查了吗？
    - 如果你是听这件事的人，还会追问什么？那就是还缺的信息
-4. 如果所有子问题都能完整回答（直接或推理）→ sufficient
-5. 如果缺信息，针对那个子问题生成检索词
+
+4. 你是这部作品的专家，你对作品的理解比片段更全面。
+   - 如果你知道答案，直接回答，不需要在片段中找到逐字确认
+   - 片段是证据，用来验证你的判断，不是唯一信息来源
+   - 不要简单列举片段中出现的名称，要理解它们之间的关系和本质（如：多个名称可能是同一事物的不同形态）
+5. sufficient 的标准：reasoning 中必须包含对用户问题的**明确、具体的回答**。
+   - ⚠ 如果你的 reasoning 里出现"无法确定""具体不知""不清楚"等字眼，那就不是 sufficient
+6. 只有当片段+你的知识都推不出具体答案时，才 insufficient 并继续搜索
 
 ## 搜索机制说明
 new_queries 走语义向量匹配（意思相近就能找到）。
 new_keywords 走原文精确子串匹配（原文必须逐字包含这个词才能命中）。
 因此 new_keywords 必须是小说原文中真实存在的短词。
-如果不确定具体数字，穷举候选：如["三年", "四年", "五年", "六年", "七年"]。
+如果不确定具体内容，用你自己的知识推测最可能的答案，把推测的具体名词加入 new_keywords 去原文中验证。
+验证通过（原文确实包含）才算找到，验证不通过就继续搜别的方向。
+这样做的目的是：你的知识可能知道答案但不确定，用 RAG 原文来确认或否定你的猜测。
 
 ## 输出格式（纯 JSON）
-能回答时：
+sufficient=true 的条件：reasoning 里必须包含用户问题的具体答案（数字、人名、事件等）。
+如果你的结论是"无法确定""不清楚""具体不知"，那必须输出 sufficient=false 继续搜索。
+片段没有直接写明答案时，用片段线索+你自己的知识推算，推算结果也算具体答案。
+
+能给出具体答案时：
 {{"sufficient": true, "reasoning": "分步推理：子问题1→答案，子问题2→答案，最终结论"}}
 
-不能回答时：
+无法给出具体答案时：
 {{"sufficient": false, "solved": "已解决的子问题", "missing": "缺什么", "new_queries": ["语义检索"], "new_keywords": ["精确子串"]}}"""
 
 
@@ -98,25 +110,56 @@ class AgenticRetrieval:
             return result
 
         agent_reasoning = ""
+        last_solved = ""
+        last_missing = ""
+        prev_reasoning = ""  # 上一轮的推理结论，传给下一轮
 
         for iteration in range(self._max_iterations - 1):
             # 每轮都看全部片段（限制数量）
             top_frags = {sid: all_fragments[sid] for sid in all_scene_ids[:self._max_fragments]}
             fragments_text = self._format_fragments(top_frags)
 
-            # 知识库事实 + 检索片段一起给评估 LLM
+            # 知识库事实 + 上一轮推理 + 检索片段一起给评估 LLM
             eval_context = ""
             if known_facts:
                 eval_context = f"## 已知事实（优先级最高）\n{known_facts}\n\n"
+            if prev_reasoning:
+                eval_context += f"## 上一轮推理结论（请在此基础上继续，不要推翻已确认的事实）\n{prev_reasoning}\n\n"
             eval_context += fragments_text
 
             provider = self._provider_first if iteration == 0 else self._provider_rest
+            logger.info(f"[agentic] 第{iteration+1}轮: 使用 provider={provider}, 片段数={len(top_frags)}")
+            # 调试：打印前几个片段的ID和前100字
+            if iteration == 0:
+                for i, (sid, text) in enumerate(top_frags.items()):
+                    if i < 20:
+                        logger.debug(f"[agentic] 片段{i+1} [{sid}] ({len(text)}字): {text[:150].replace(chr(10), ' ')}")
             eval_result = await self._evaluate(
                 user_message, eval_context, len(top_frags),
                 character_name, identity, provider=provider,
             )
 
-            if eval_result is None or eval_result.get("sufficient", True):
+            # LLM 调用失败 → 直接用已有片段
+            if eval_result is None:
+                logger.warning(f"[agentic] 第{iteration+1}轮: 评估失败，用已有片段")
+                break
+
+            is_sufficient = eval_result.get("sufficient", True)
+
+            # 首轮强制 insufficient：避免只看到第一批片段就下结论
+            if is_sufficient and iteration == 0:
+                reasoning = eval_result.get("reasoning", "")
+                logger.info(f"[agentic] 第1轮: 强制续搜（首轮不允许sufficient）. {reasoning[:200]}")
+                prev_reasoning = reasoning  # 完整保留给下一轮
+                eval_result = {
+                    "sufficient": False,
+                    "solved": reasoning,
+                    "missing": "首轮强制续搜，验证是否有遗漏信息",
+                    "new_queries": [user_message],
+                    "new_keywords": initial_keywords or [],
+                }
+
+            if is_sufficient and iteration > 0:
                 agent_reasoning = eval_result.get("reasoning", "") if eval_result else ""
                 logger.info(f"[agentic] 第{iteration+1}轮: sufficient. {agent_reasoning[:200]}")
                 break
@@ -126,6 +169,13 @@ class AgenticRetrieval:
             new_queries = eval_result.get("new_queries", [])
             new_keywords = eval_result.get("new_keywords", [])
             logger.info(f"[agentic] 第{iteration+1}轮: 已知[{solved[:80]}] 缺[{missing[:120]}] → kw: {new_keywords[:10]}")
+
+            # 更新上一轮推理，传给下一轮
+            prev_reasoning = f"已知：{solved}\n缺失：{missing}" if solved else prev_reasoning
+
+            # 保存最后一轮的已知信息作为 fallback
+            last_solved = solved
+            last_missing = missing
 
             if not new_queries and not new_keywords:
                 break
@@ -151,7 +201,14 @@ class AgenticRetrieval:
                 logger.info(f"[agentic] 无新片段，停止")
                 break
 
-        return self._assemble_result(all_scene_ids, all_fragments, agent_reasoning)
+        # 迭代耗尽未 sufficient 时，用最后一轮的已知+缺失作为 fallback
+        is_fallback = False
+        if not agent_reasoning and last_solved:
+            agent_reasoning = f"已知：{last_solved}\n未确认：{last_missing}"
+            is_fallback = True
+            logger.info(f"[agentic] 迭代耗尽，使用 fallback: {agent_reasoning[:200]}")
+
+        return self._assemble_result(all_scene_ids, all_fragments, agent_reasoning, is_fallback)
 
     @staticmethod
     def _expand_keywords(keywords: list[str], missing: str) -> list[str]:
@@ -167,6 +224,14 @@ class AgenticRetrieval:
                 if yk not in expanded:
                     expanded.append(yk)
 
+        # 缺结束点/离开时间 → 注入结束事件关键词
+        end_triggers = ["结束", "离开", "回归", "重逢", "结束点", "何时离开", "何时回"]
+        if any(t in missing_lower for t in end_triggers):
+            end_kws = ["离开", "回归", "重逢", "归来", "返回", "结束", "告别", "出发"]
+            for ek in end_kws:
+                if ek not in expanded:
+                    expanded.append(ek)
+
         # 缺年龄 → 注入数字+岁
         age_triggers = ["几岁", "年龄", "多大", "岁数"]
         if any(t in missing_lower for t in age_triggers):
@@ -177,12 +242,15 @@ class AgenticRetrieval:
 
         return expanded
 
-    def _assemble_result(self, all_scene_ids, all_fragments, agent_reasoning):
+    def _assemble_result(self, all_scene_ids, all_fragments, agent_reasoning, is_fallback=False):
         from src.models import L3Result
         sep = "\n\n---SCENE---\n\n"
         parts = []
         if agent_reasoning:
-            parts.append(f"★以下是系统根据多个原文片段的综合推理，请据此回答★\n【推理结论】{agent_reasoning}")
+            if is_fallback:
+                parts.append(f"★系统未能找到完整答案，以下是部分分析，请结合下方原文片段自行推理★\n{agent_reasoning}")
+            else:
+                parts.append(f"★以下是系统根据多个原文片段的综合推理，请据此回答★\n【推理结论】{agent_reasoning}")
         for sid in all_scene_ids:
             if sid in all_fragments:
                 parts.append(all_fragments[sid])
@@ -203,7 +271,7 @@ class AgenticRetrieval:
     def _format_fragments(self, frags: dict[str, str]) -> str:
         parts = []
         for i, (sid, text) in enumerate(frags.items()):
-            parts.append(f"[片段{i+1}] ({sid})\n{text[:500]}")
+            parts.append(f"[片段{i+1}] ({sid})\n{text}")
         return "\n\n".join(parts)
 
     async def _evaluate(self, user_message: str, all_fragments: str,

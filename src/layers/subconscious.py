@@ -199,11 +199,11 @@ class SubconsciousMemory:
             return False
 
         # 存储 + 重建向量
-        key = self._memory_key(sender_id, identity)
-        self._store_memory(key, memory_text)
-        self._rebuild_collection(key)
+        mem_key = self._memory_key(sender_id, identity)
+        self._store_memory(mem_key, memory_text)
+        self._rebuild_collection(mem_key)
 
-        logger.info(f"潜意识记忆存入 [{sender_id}]: {memory_text}")
+        logger.info(f"潜意识记忆存入 [{mem_key}]: {memory_text}")
         return True
 
     # ── 持久化 ───────────────────────────────────────────────

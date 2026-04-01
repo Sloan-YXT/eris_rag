@@ -109,6 +109,56 @@ def chunk_text(
     return chunks
 
 
+@dataclass
+class ParentChildResult:
+    """父子块结果。"""
+    parent: TextChunkResult
+    children: list[TextChunkResult]
+
+
+def chunk_text_parent_child(
+    text: str,
+    parent_size: int = 512,
+    parent_overlap: int = 64,
+    child_size: int = 80,
+    child_overlap: int = 24,
+    min_size: int = 30,
+) -> list[ParentChildResult]:
+    """父子块切分：先切父块，再从每个父块中切子块。
+
+    子块用于 embedding 搜索（小而精准），
+    父块用于返回上下文（大而完整）。
+    """
+    if not text or not text.strip():
+        return []
+
+    # 第一层：切父块
+    parents = chunk_text(
+        text,
+        target_size=parent_size,
+        max_size=int(parent_size * 1.2),
+        min_size=min_size,
+        overlap=parent_overlap,
+    )
+
+    results = []
+    for parent in parents:
+        # 第二层：在每个父块内切子块
+        children = chunk_text(
+            parent.text,
+            target_size=child_size,
+            max_size=int(child_size * 1.5),
+            min_size=min_size,
+            overlap=child_overlap,
+        )
+        # 子块的 char_offset 要加上父块在全文中的偏移
+        for child in children:
+            child.char_offset += parent.char_offset
+        results.append(ParentChildResult(parent=parent, children=children))
+
+    return results
+
+
 def _find_best_cut(text: str, start: int, target: int, maximum: int) -> int:
     """在 [start+target, start+maximum] 范围内找最佳切割点。
 

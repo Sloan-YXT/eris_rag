@@ -30,7 +30,7 @@ class EmbeddingModel:
         from sentence_transformers import SentenceTransformer
 
         logger.info(f"Loading embedding model {self._model_name} on {self._device}")
-        self._model = SentenceTransformer(self._model_name, device=self._device)
+        self._model = SentenceTransformer(self._model_name, device=self._device, trust_remote_code=True)
         logger.info("Embedding model loaded")
 
     @property

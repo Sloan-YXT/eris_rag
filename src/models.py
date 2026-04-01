@@ -8,14 +8,16 @@ from pydantic import BaseModel, Field
 # ── L3 Chunk (原文分块，embedding 的基本单位) ─────────────
 
 class Chunk(BaseModel):
-    """一个原文分块。embedding 输入 = raw_text。"""
-    id: str                                     # "v{vol:02d}_ch{chap:02d}_{seq:04d}"
-    raw_text: str                               # 小说原文片段（直接 embed 这个）
+    """一个原文分块。父子块模式下，子块用于搜索，父块用于返回上下文。"""
+    id: str                                     # 子块: "v{vol}_c{chap}_{seq}_s{sub}" 父块: "v{vol}_c{chap}_{seq}"
+    raw_text: str                               # 原文片段
     volume: int
     chapter: int = 0
     chunk_index: int = 0                        # 全书中的序号
     char_offset: int = 0                        # 在源文件中的字符偏移
     source_file: str = ""                       # 来源文件名
+    parent_id: str = ""                         # 子块指向父块的 ID（父块本身为空）
+    is_child: bool = False                      # 是否为子块
 
     # Period（从卷号推断）
     period: str = ""
