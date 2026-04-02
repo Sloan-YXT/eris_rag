@@ -82,6 +82,7 @@ class AgenticRetrieval:
         self._search_top_k = config.get("agentic.search_top_k", 15)
         self._provider_first = config.get("agentic.provider_first", config.get_runtime_provider("step_a"))
         self._provider_rest = config.get("agentic.provider_rest", config.get_runtime_provider("step_a"))
+        self._force_second_round = config.get("agentic.force_second_round", True)
 
     async def retrieve(
         self,
@@ -147,7 +148,7 @@ class AgenticRetrieval:
             is_sufficient = eval_result.get("sufficient", True)
 
             # 首轮强制 insufficient：避免只看到第一批片段就下结论
-            if is_sufficient and iteration == 0:
+            if is_sufficient and iteration == 0 and self._force_second_round:
                 reasoning = eval_result.get("reasoning", "")
                 logger.info(f"[agentic] 第1轮: 强制续搜（首轮不允许sufficient）. {reasoning[:200]}")
                 prev_reasoning = reasoning  # 完整保留给下一轮
