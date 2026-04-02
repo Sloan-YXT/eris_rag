@@ -173,6 +173,49 @@ class Assembler:
         step_a_result = await self._step_a.analyze_async(user_message, conversation_context)
         return await self._assemble_inner(step_a_result, user_message, conversation_context, sender_id, sender_nickname, identity)
 
+    async def _should_use_agentic(self, user_message: str, conversation_context: list[str] | None) -> bool:
+        """调用轻量 LLM 判断本次消息是否需要 agentic 迭代检索。
+        偏保守：有疑问就返回 True（做 agentic）。
+        """
+        # 空消息/无意义消息不需要检索
+        stripped = user_message.strip().strip("[]【】")
+        if not stripped or stripped in ("空消息", "无内容", ""):
+            return False
+
+        provider = self._config.get("agentic.classifier_provider", "")
+        if not provider:
+            return True  # 未配置则始终 agentic
+
+        context_str = "\n".join((conversation_context or [])[-4:]) or "（无）"
+        prompt = (
+            "判断下方对话消息是否需要查询小说原文才能正确回答。\n\n"
+            "需要查询（输出 YES）：涉及角色经历、具体事件、人物关系、时间年龄、世界观设定、技能招式等需要原著依据的内容。有任何疑问默认 YES。\n"
+            "不需要查询（输出 NO）：纯情感互动、日常寒暄、当下行为指令等无需原著支撑的内容。\n\n"
+            f"对话上下文：\n{context_str}\n\n"
+            f"消息：{user_message}\n\n"
+            "只输出 YES 或 NO。"
+        )
+
+        from src.llm.client import LLMClient
+        client = LLMClient(self._config)
+        try:
+            response = await client.complete(
+                provider=provider,
+                system_prompt="你是一个对话分类模块，只输出 YES 或 NO。",
+                user_prompt=prompt,
+                temperature=0.0,
+                max_tokens=8,
+            )
+        except Exception as e:
+            logger.warning(f"[assembler] agentic 分类器失败 ({e})，默认走 agentic")
+            return True
+        finally:
+            await client.close()
+
+        result = response.strip().upper().startswith("Y")
+        logger.info(f"[assembler] agentic 分类: {'YES' if result else 'NO'} (消息: {user_message[:60]})")
+        return result
+
     async def _assemble_inner(
         self,
         step_a_result: StepAResult,
@@ -217,7 +260,9 @@ class Assembler:
         # 提前解析用户关系，给 agentic 用
         user_prompt = self._get_user_prompt(sender_id, sender_nickname)
 
-        if self._agentic:
+        use_agentic = self._agentic and await self._should_use_agentic(user_message, conversation_context)
+
+        if use_agentic:
             # 把知识库 + 用户关系描述一起给 agent 作为已知信息
             agent_facts = kb_text
             if user_prompt:
@@ -239,6 +284,8 @@ class Assembler:
                 known_facts=agent_facts,
             )
         else:
+            if self._agentic and not use_agentic:
+                logger.info("[assembler] 分类器判断无需 agentic，走单次 L3")
             content_result = self._l3.retrieve(
                 query=content_query,
                 filter_tags=None,
