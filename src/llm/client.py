@@ -19,9 +19,9 @@ class LLMClient:
         response = await client.complete("gemini", system_prompt, user_prompt)
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, timeout: float = 300.0):
         self._config = config
-        self._http = httpx.AsyncClient(timeout=120.0)
+        self._http = httpx.AsyncClient(timeout=timeout)
 
     async def close(self) -> None:
         await self._http.aclose()

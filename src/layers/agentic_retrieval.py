@@ -83,6 +83,7 @@ class AgenticRetrieval:
         self._provider_first = config.get("agentic.provider_first", config.get_runtime_provider("step_a"))
         self._provider_rest = config.get("agentic.provider_rest", config.get_runtime_provider("step_a"))
         self._force_second_round = config.get("agentic.force_second_round", True)
+        self._eval_timeout = config.get("agentic.eval_timeout", 60)
 
     async def retrieve(
         self,
@@ -140,30 +141,37 @@ class AgenticRetrieval:
                 character_name, identity, provider=provider,
             )
 
-            # LLM 调用失败 → 直接用已有片段
+            # LLM 调用失败 → 尝试 fallback provider，再失败才放弃
             if eval_result is None:
-                logger.warning(f"[agentic] 第{iteration+1}轮: 评估失败，用已有片段")
-                break
+                if provider != self._provider_rest:
+                    logger.warning(f"[agentic] 第{iteration+1}轮: {provider} 失败，fallback 到 {self._provider_rest}")
+                    eval_result = await self._evaluate(
+                        user_message, eval_context, len(top_frags),
+                        character_name, identity, provider=self._provider_rest,
+                    )
+                if eval_result is None:
+                    logger.warning(f"[agentic] 第{iteration+1}轮: 评估失败，用已有片段")
+                    break
 
             is_sufficient = eval_result.get("sufficient", True)
 
-            # 首轮强制 insufficient：避免只看到第一批片段就下结论
-            if is_sufficient and iteration == 0 and self._force_second_round:
-                reasoning = eval_result.get("reasoning", "")
-                logger.info(f"[agentic] 第1轮: 强制续搜（首轮不允许sufficient）. {reasoning[:200]}")
-                prev_reasoning = reasoning  # 完整保留给下一轮
-                eval_result = {
-                    "sufficient": False,
-                    "solved": reasoning,
-                    "missing": "首轮强制续搜，验证是否有遗漏信息",
-                    "new_queries": [user_message],
-                    "new_keywords": initial_keywords or [],
-                }
-
-            if is_sufficient and iteration > 0:
-                agent_reasoning = eval_result.get("reasoning", "") if eval_result else ""
-                logger.info(f"[agentic] 第{iteration+1}轮: sufficient. {agent_reasoning[:200]}")
-                break
+            if is_sufficient:
+                agent_reasoning = eval_result.get("reasoning", "")
+                # 首轮强制续搜：保留结论，继续搜索
+                if iteration == 0 and self._force_second_round:
+                    logger.info(f"[agentic] 第1轮: 强制续搜（首轮不允许sufficient）. {agent_reasoning[:200]}")
+                    prev_reasoning = agent_reasoning
+                    eval_result = {
+                        "sufficient": False,
+                        "solved": agent_reasoning,
+                        "missing": "首轮强制续搜，验证是否有遗漏信息",
+                        "new_queries": [user_message],
+                        "new_keywords": initial_keywords or [],
+                    }
+                    is_sufficient = False  # 继续走下面的 solved/missing/queries 提取
+                else:
+                    logger.info(f"[agentic] 第{iteration+1}轮: sufficient. {agent_reasoning[:200]}")
+                    break
 
             solved = eval_result.get("solved", "")
             missing = eval_result.get("missing", "")
@@ -286,7 +294,7 @@ class AgenticRetrieval:
         prompt = prompt.replace("{all_fragments}", all_fragments)
         prompt = prompt.replace("{fragment_count}", str(fragment_count))
 
-        client = LLMClient(self._config)
+        client = LLMClient(self._config, timeout=self._eval_timeout)
         try:
             response = await client.complete(
                 provider=provider or self._provider_first,
@@ -296,7 +304,7 @@ class AgenticRetrieval:
                 max_tokens=8192,
             )
         except Exception as e:
-            logger.error(f"[agentic] 评估失败: {e}")
+            logger.error(f"[agentic] 评估失败: {type(e).__name__}: {e}")
             return None
         finally:
             await client.close()

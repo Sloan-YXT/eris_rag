@@ -207,7 +207,7 @@ class Assembler:
                 max_tokens=8,
             )
         except Exception as e:
-            logger.warning(f"[assembler] agentic 分类器失败 ({e})，默认走 agentic")
+            logger.warning(f"[assembler] agentic 分类器失败 ({type(e).__name__}: {e})，默认走 agentic")
             return True
         finally:
             await client.close()
